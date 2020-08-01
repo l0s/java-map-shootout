@@ -16,19 +16,15 @@
 package com.macasaet.shootout;
 
 import static org.junit.jupiter.api.DynamicContainer.dynamicContainer;
-import static org.junit.jupiter.api.DynamicTest.dynamicTest;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Random;
-import java.util.TreeMap;
-import java.util.concurrent.Callable;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -36,9 +32,7 @@ import java.util.stream.Stream;
 
 import org.junit.jupiter.api.DynamicContainer;
 import org.junit.jupiter.api.DynamicNode;
-import org.junit.jupiter.api.DynamicTest;
 import org.junit.jupiter.api.TestFactory;
-import org.junit.jupiter.api.function.Executable;
 
 /**
  * This class benchmarks and compares various Java {@link Map}
@@ -54,50 +48,16 @@ import org.junit.jupiter.api.function.Executable;
 public class MapShootout {
 
     private final Random random = new Random();
+    private final List<MapSupplier> mapSuppliers;
 
-    public interface MapSupplier {
-        Map<Long, Long> createLongMap();
-        Map<String, Long> createStringMap();
-        String name();
+    public MapShootout(final List<MapSupplier> mapSuppliers) {
+        Objects.requireNonNull(mapSuppliers);
+        this.mapSuppliers = mapSuppliers;
     }
 
-    protected enum MapImplementation implements MapSupplier {
-        JDK_HASH_MAP() {
-
-            public Map<Long, Long> createLongMap() {
-                return new HashMap<>();
-            }
-
-            public Map<String, Long> createStringMap() {
-                return new HashMap<>();
-            }
-
-        },
-        JDK_LINKED_HASH_MAP() {
-
-            public Map<Long, Long> createLongMap() {
-                return new LinkedHashMap<>();
-            }
-
-            public Map<String, Long> createStringMap() {
-                return new LinkedHashMap<>();
-            }
-            
-        },
-        JDK_TREE_MAP() {
-            public Map<Long, Long> createLongMap() {
-                return new TreeMap<>();
-            }
-
-            public Map<String, Long> createStringMap() {
-                return new TreeMap<>();
-            }
-        };
-
-        protected static Stream<MapSupplier> stream() {
-            return Arrays.stream(values());
-        }
-
+    public MapShootout() {
+        this(Arrays.asList(JdkHashTables.JDK_HASH_MAP, JdkHashTables.JDK_LINKED_HASH_MAP,
+                JdkSearchTrees.JDK_TREE_MAP));
     }
 
     @TestFactory
@@ -133,14 +93,14 @@ public class MapShootout {
         return IntStream.range(0, numKeys).mapToObj(ignore -> {
             final var builder = new StringBuilder(stringLength);
             random.ints(Character.MIN_CODE_POINT, Character.MAX_CODE_POINT)
-                .filter(this::isInvalidCodePoint)
+                .filter(this::isValidCodePoint)
                 .limit(stringLength)
                 .forEach(builder::appendCodePoint);
             return builder.toString();
         }).collect(Collectors.toList());
     }
 
-    protected boolean isInvalidCodePoint(final int codePoint) {
+    protected boolean isValidCodePoint(final int codePoint) {
         if (codePoint >= 0xe000 && codePoint <= 0xf8ff) {
             // basic multilingual plane (6,400 code points)
             return false;
@@ -165,16 +125,17 @@ public class MapShootout {
     }
 
     protected List<Long> generateIntegerKeys(final long minValue, final int size) {
-        return random.longs(size, 0, Long.MAX_VALUE)
+        return random.longs(size, minValue, Long.MAX_VALUE)
                 .collect(() -> new ArrayList<Long>(size),
                         (list, key) -> list.add(key),
                         (x, y) -> x.addAll(y));
     }
 
-    protected DynamicContainer createIntegerTests(final Collection<Long> nonNegativeKeys, Collection<Long> fullKeys) {
+    protected DynamicContainer createIntegerTests(final Collection<Long> nonNegativeKeys, final Collection<Long> fullKeys) {
         return dynamicContainer(nonNegativeKeys.size() + " keys",
-                MapImplementation.stream()
-                .map(mapImplementation -> createIntegerTests(nonNegativeKeys, fullKeys, mapImplementation)));
+                getMapSuppliers().stream()
+                .map(mapImplementation -> createIntegerTests(nonNegativeKeys, fullKeys, mapImplementation))
+        );
     }
 
     protected DynamicContainer createIntegerTests(final Collection<Long> nonNegativeKeys, Collection<Long> fullKeys, final MapSupplier mapImplementation) {
@@ -184,20 +145,24 @@ public class MapShootout {
         final List<Long> differentKeys = generateIntegerKeys(Long.MIN_VALUE, size);
 
         return dynamicContainer(mapImplementation.name(),
-                Stream.of(createTest(mapImplementation, keyLabel, "randomShuffleInserts", size, () -> randomShuffleInserts(nonNegativeKeys, mapSupplier)),
-                    createTest(mapImplementation, keyLabel, "randomShuffleFullInserts", size, () -> randomShuffleInserts(fullKeys, mapSupplier)),
-                    createTest(mapImplementation, keyLabel, "randomShuffleFullDeletes", size, () -> randomShuffleFullDeletes(fullKeys, mapSupplier)),
-                    createTest(mapImplementation, keyLabel, "randomShuffleReads", size, () -> randomShuffleReads(nonNegativeKeys, mapSupplier)),
-                    createTest(mapImplementation, keyLabel, "randomShuffleFullReads", size, () -> randomShuffleReads(fullKeys, mapSupplier)),
-                    createTest(mapImplementation, keyLabel, "randomShuffleFullReadMisses", size, () -> randomShuffleFullReadMisses(fullKeys, mapSupplier, differentKeys)),
-                    createTest(mapImplementation, keyLabel, "randomShuffleFullReadsAfterDeletingHalf", size, () -> randomShuffleFullReadsAfterDeletingHalf(fullKeys, mapSupplier)),
-                    createTest(mapImplementation, keyLabel, "randomFullIteration", size, () -> randomFullIteration(fullKeys, mapSupplier)))
-                );
+                Stream.of(new Inserts<>(mapImplementation, mapSupplier, keyLabel, "randomShuffleInserts", nonNegativeKeys),
+                        new Inserts<>(mapImplementation, mapSupplier, keyLabel, "randomShuffleFullInserts", fullKeys),
+                        new Deletes<>(mapImplementation, mapSupplier, keyLabel, "randomShuffleFullDeletes", fullKeys),
+                        new Reads<>(mapImplementation, mapSupplier, keyLabel, "randomShuffleReads", nonNegativeKeys),
+                        new Reads<>(mapImplementation, mapSupplier, keyLabel, "randomShuffleFullReads", fullKeys),
+                        new ReadMisses<>(mapImplementation, mapSupplier, keyLabel, "randomShuffleFullReadMisses", fullKeys, differentKeys),
+                        new ReadsAfterDeletingHalf<>(mapImplementation, mapSupplier, keyLabel, "randomShuffleFullReadsAfterDeletingHalf", fullKeys),
+                        new FullIteration<>(mapImplementation, mapSupplier, keyLabel, "randomFullIteration", fullKeys)
+                )
+                .map(MapBenchmark::asDynamicTest)
+        );
     }
 
     protected DynamicContainer createStringTests(final Collection<String> keys, final String keyLabel, final int stringKeyLength) {
         return dynamicContainer(keys.size() + " keys",
-                MapImplementation.stream().map(implementation -> createStringTests(keyLabel, keys, implementation, stringKeyLength)));
+                getMapSuppliers().stream()
+                .map(implementation -> createStringTests(keyLabel, keys, implementation, stringKeyLength))
+        );
     }
 
     protected DynamicContainer createStringTests(final String keyLabel, final Collection<String> keys, final MapSupplier mapImplementation, final int stringKeyLength) {
@@ -206,124 +171,170 @@ public class MapShootout {
         final List<String> differentKeys = generateStringKeys(stringKeyLength, size);
 
         return dynamicContainer(mapImplementation.name(),
-                Stream.of(createTest(mapImplementation, keyLabel, "inserts", size, () -> randomShuffleInserts(keys, supplier)),
-                        createTest(mapImplementation, keyLabel, "deletes", size, () -> randomShuffleFullDeletes(keys, supplier)),
-                        createTest(mapImplementation, keyLabel, "reads", size, () -> randomShuffleReads(keys, supplier)),
-                        createTest(mapImplementation, keyLabel, "readMisses", size, () -> randomShuffleFullReadMisses(keys, supplier, differentKeys)),
-                        createTest(mapImplementation, keyLabel, "readsAfterDeletingHalf", size, () -> randomShuffleFullReadsAfterDeletingHalf(keys, supplier)))
-                );
+                Stream.of(new Inserts<>(mapImplementation, supplier, keyLabel, "inserts", keys),
+                    new Deletes<>(mapImplementation, supplier, keyLabel, "deletes", keys),
+                    new Reads<>(mapImplementation, supplier, keyLabel, "reads", keys),
+                    new ReadMisses<>(mapImplementation, supplier, keyLabel, "readMisses", keys, differentKeys),
+                    new ReadsAfterDeletingHalf<>(mapImplementation, supplier, keyLabel, "readsAfterDeletingHalf", keys)
+                )
+                .map(MapBenchmark::asDynamicTest)
+        );
     }
 
-    protected DynamicTest createTest(final MapSupplier mapSupplier, final String keyLabel, final String testLabel,
-            final int size, final Callable<Long> invocation) {
-        return dynamicTest(testLabel, emitTiming(mapSupplier, keyLabel, testLabel, size, invocation));
+    protected class Inserts<K> extends MapBenchmark<K> {
+
+        public Inserts(MapSupplier implementation, Supplier<Map<K, Long>> mapSupplier, String keyLabel,
+                String testLabel, Collection<K> keys) {
+            super(implementation, mapSupplier, keyLabel, testLabel, keys);
+        }
+
+        protected void benchmark(final Map<K, Long> map) {
+            getKeys().forEach(key -> map.put(key, 1l));
+        }
+        
     }
 
-    protected Executable emitTiming(final MapSupplier mapSupplier, final String keyLabel, final String testLabel,
-            final int size, final Callable<Long> invocation) {
-        return () -> {
-            System.gc();
-            final long elapsedNanoSeconds = invocation.call();
-            // FIXME output timing to a file so that memory usage can be output to a separate file
-            System.out.println(
-                    keyLabel + '\t' + testLabel + '\t' + mapSupplier.name() + '\t' + size + '\t' + elapsedNanoSeconds);
-        };
+    protected class Deletes<K> extends MapBenchmark<K> {
+
+        private List<K> deletionKeys;
+
+        public Deletes(MapSupplier implementation, Supplier<Map<K, Long>> mapSupplier, String keyLabel,
+                String testLabel, Collection<K> keys) {
+            super(implementation, mapSupplier, keyLabel, testLabel, keys);
+        }
+
+        protected void benchmark(final Map<K, Long> map) {
+            deletionKeys.forEach(map::remove);
+        }
+
+        protected void init() {
+            super.init();
+
+            deletionKeys = new ArrayList<>(getKeys());
+            Collections.shuffle(deletionKeys);
+
+            getKeys().forEach(key -> getMap().put(key, 1l));
+        }
+
+        protected void destroy() {
+            deletionKeys.clear();
+            deletionKeys = null;
+
+            super.destroy();
+        }
+        
     }
 
-    public final <K> long randomShuffleInserts(final Collection<K> keys, final Supplier<Map<K, Long>> mapSupplier) {
-        final var map = mapSupplier.get();
+    protected class Reads<K> extends MapBenchmark<K> {
 
-        final var startNanos = System.nanoTime();
-        keys.forEach(key -> map.put(key, 1l));
-        final var endNanos = System.nanoTime();
+        private List<K> readKeys;
 
-        return endNanos - startNanos;
+        public Reads(MapSupplier implementation, Supplier<Map<K, Long>> mapSupplier, String keyLabel,
+                String testLabel, Collection<K> keys) {
+            super(implementation, mapSupplier, keyLabel, testLabel, keys);
+        }
+
+        protected void init() {
+            super.init();
+
+            readKeys = new ArrayList<>(getKeys());
+            Collections.shuffle(readKeys);
+
+            getKeys().forEach(key -> getMap().put(key, 1l));
+        }
+
+        protected void destroy() {
+            readKeys.clear();
+            readKeys = null;
+
+            super.destroy();
+        }
+
+        protected void benchmark(final Map<K, Long> map) {
+            readKeys.forEach(map::get);
+        }
+        
     }
 
-    public final <K> long randomShuffleFullDeletes(final Collection<K> keys, final Supplier<Map<K, Long>> mapSupplier) {
-        final var map = mapSupplier.get();
-        final var deletionKeys = new ArrayList<>(keys);
-        Collections.shuffle(deletionKeys);
-        keys.forEach(key -> map.put(key, 1l));
+    protected class ReadMisses<K> extends MapBenchmark<K> {
+        
+        private final Collection<K> differentKeys;
 
-        final var startNanos = System.nanoTime();
-        deletionKeys.forEach(map::remove);
-        final var endNanos = System.nanoTime();
+        public ReadMisses(MapSupplier implementation, Supplier<Map<K, Long>> mapSupplier, String keyLabel,
+                String testLabel, Collection<K> keys, final Collection<K> differentKeys) {
+            super(implementation, mapSupplier, keyLabel, testLabel, keys);
+            Objects.requireNonNull(differentKeys);
+            if (differentKeys.size() != keys.size()) {
+                throw new IllegalArgumentException("key count mismatch");
+            }
+            this.differentKeys = differentKeys;
+        }
 
-        // clean up
-        map.clear();
-        deletionKeys.clear();
+        protected void init() {
+            super.init();
 
-        return endNanos - startNanos;
+            getKeys().forEach(key -> getMap().put(key, 1l));
+        }
+
+        protected void benchmark(final Map<K, Long> map) {
+            differentKeys.forEach(map::get);
+        }
+        
     }
 
-    public final <K> long randomShuffleReads(final Collection<K> keys, final Supplier<Map<K, Long>> mapSupplier) {
-        final var map = mapSupplier.get();
-        final var readKeys = new ArrayList<>(keys);
-        Collections.shuffle(readKeys);
-        keys.forEach(key -> map.put(key, 1l));
+    protected class ReadsAfterDeletingHalf<K> extends MapBenchmark<K> {
 
-        final var startNanos = System.nanoTime();
-        readKeys.forEach(map::get);
-        final var endNanos = System.nanoTime();
+        private List<K> readKeys;
 
-        // clean up
-        map.clear();
-        readKeys.clear();
+        public ReadsAfterDeletingHalf(MapSupplier implementation, Supplier<Map<K, Long>> mapSupplier,
+                String keyLabel, String testLabel, Collection<K> keys) {
+            super(implementation, mapSupplier, keyLabel, testLabel, keys);
+        }
 
-        return endNanos - startNanos;
+        protected void init() {
+            super.init();
+            
+            readKeys = new ArrayList<>(getKeys());
+            Collections.shuffle(readKeys);
+            readKeys.subList(0, readKeys.size() / 2).forEach(getMap()::remove);
+            Collections.shuffle(readKeys);
+        }
+
+        protected void destroy() {
+            readKeys.clear();
+            readKeys = null;
+
+            super.destroy();
+        }
+
+        protected void benchmark(final Map<K, Long> map) {
+            readKeys.forEach(map::get);
+        }
+
     }
 
-    public final <K> long randomShuffleFullReadMisses(final Collection<K> keys,
-            final Supplier<Map<K, Long>> mapSupplier, final Collection<K> differentKeys) {
-        final var map = mapSupplier.get();
-        keys.forEach(key -> map.put(key, 1l));
+    protected class FullIteration<K> extends MapBenchmark<K> {
 
-        final var startNanos = System.nanoTime();
-        differentKeys.forEach(map::get);
-        final var endNanos = System.nanoTime();
+        public FullIteration(MapSupplier implementation, Supplier<Map<K, Long>> mapSupplier, String keyLabel,
+                String testLabel, Collection<K> keys) {
+            super(implementation, mapSupplier, keyLabel, testLabel, keys);
+        }
 
-        // clean up
-        map.clear();
+        protected void init() {
+            super.init();
+            
+            getKeys().forEach(key -> getMap().put(key, 1l));
+        }
 
-        return endNanos - startNanos;
+        protected void benchmark(Map<K, Long> map) {
+            getMap().forEach((key, value) -> {
+            });
+        }
+        
     }
 
-    public final <K> long randomShuffleFullReadsAfterDeletingHalf(final Collection<K> keys,
-            final Supplier<Map<K, Long>> mapSupplier) {
-        final var map = mapSupplier.get();
-        keys.forEach(key -> map.put(key, 1l));
-
-        final var readKeys = new ArrayList<>(keys);
-        Collections.shuffle(readKeys);        
-        readKeys.subList(0, readKeys.size() / 2).forEach(map::remove);
-        Collections.shuffle(readKeys);
-
-        final var startNanos = System.nanoTime();
-        readKeys.forEach(map::get);
-        final var endNanos = System.nanoTime();
-
-        // clean up
-        map.clear();
-        readKeys.clear();
-
-        return endNanos - startNanos;
+    protected List<MapSupplier> getMapSuppliers() {
+        return mapSuppliers;
     }
 
-    public final <K> long randomFullIteration(final Collection<K> keys, final Supplier<Map<K, Long>> mapSupplier) {
-        final var map = mapSupplier.get();
-        keys.forEach(key -> map.put(key, 1l));
-
-        final var startNanos = System.nanoTime();
-        map.forEach((key, value) -> {
-        });
-        final var endNanos = System.nanoTime();
-
-        // clean up
-        map.clear();
-
-        return endNanos - startNanos;
-    }
-
-    // FIXME measure memory usage for int64, small string, and large string
 }

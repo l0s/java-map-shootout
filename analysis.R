@@ -19,7 +19,7 @@ library( 'svglite' )
 data <-
   read.table( 'data.tsv',
               sep='\t',
-              col.names=c( 'keyType', 'test', 'implementation', 'numKeys', 'timeNanos' ) )
+              col.names=c( 'keyType', 'test', 'implementation', 'numKeys', 'timeNanos', 'memory' ) )
 data$timeSeconds <- data$timeNanos / 1000000000
 
 # filter out tree-based implementations
@@ -98,6 +98,15 @@ ggplot( int_data %>% filter( test=='randomFullIteration' ),
         x="Number of keys",
         y="Time (seconds)" )
 ggsave( 'images/int64-random-full-iteration.svg' )
+
+ggplot( int_data %>% filter( test=='randomShuffleFullInserts' ),
+        aes( x=numKeys, y=memory, group=implementation ) ) +
+  geom_line( aes( color=implementation ) ) +
+  geom_point( aes( color=implementation ) ) +
+  labs( title="Int64::Memory usage after inserts (full key range)",
+        x="Number of keys",
+        y="Bytes" )
+ggsave( 'images/int64-insert-memory.svg' )
 
 small_string_data <- data %>% filter( keyType=='smallString' )
 
