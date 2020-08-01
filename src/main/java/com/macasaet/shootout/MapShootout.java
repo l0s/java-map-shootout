@@ -17,6 +17,7 @@ package com.macasaet.shootout;
 
 import static org.junit.jupiter.api.DynamicContainer.dynamicContainer;
 
+import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -50,14 +51,16 @@ public class MapShootout {
     private final Random random = new Random();
     private final List<MapSupplier> mapSuppliers;
 
+    private PrintWriter outputSink;
+
     public MapShootout(final List<MapSupplier> mapSuppliers) {
         Objects.requireNonNull(mapSuppliers);
         this.mapSuppliers = mapSuppliers;
     }
 
     public MapShootout() {
-        this(Arrays.asList(JdkHashTables.JDK_HASH_MAP, JdkHashTables.JDK_LINKED_HASH_MAP,
-                JdkSearchTrees.JDK_TREE_MAP));
+        this(Arrays.asList(JdkHashTables.JDK_HASH_MAP,
+                JdkHashTables.JDK_LINKED_HASH_MAP, JdkSearchTrees.JDK_TREE_MAP));
     }
 
     @TestFactory
@@ -191,6 +194,10 @@ public class MapShootout {
         protected void benchmark(final Map<K, Long> map) {
             getKeys().forEach(key -> map.put(key, 1l));
         }
+
+        protected PrintWriter getWriter() {
+            return MapShootout.this.getWriter();
+        }
         
     }
 
@@ -221,6 +228,10 @@ public class MapShootout {
             deletionKeys = null;
 
             super.destroy();
+        }
+
+        protected PrintWriter getWriter() {
+            return MapShootout.this.getWriter();
         }
         
     }
@@ -253,6 +264,10 @@ public class MapShootout {
         protected void benchmark(final Map<K, Long> map) {
             readKeys.forEach(map::get);
         }
+
+        protected PrintWriter getWriter() {
+            return MapShootout.this.getWriter();
+        }
         
     }
 
@@ -278,6 +293,10 @@ public class MapShootout {
 
         protected void benchmark(final Map<K, Long> map) {
             differentKeys.forEach(map::get);
+        }
+
+        protected PrintWriter getWriter() {
+            return MapShootout.this.getWriter();
         }
         
     }
@@ -311,6 +330,10 @@ public class MapShootout {
             readKeys.forEach(map::get);
         }
 
+        protected PrintWriter getWriter() {
+            return MapShootout.this.getWriter();
+        }
+
     }
 
     protected class FullIteration<K> extends MapBenchmark<K> {
@@ -330,11 +353,27 @@ public class MapShootout {
             getMap().forEach((key, value) -> {
             });
         }
+
+        protected PrintWriter getWriter() {
+            return MapShootout.this.getWriter();
+        }
         
     }
 
     protected List<MapSupplier> getMapSuppliers() {
         return mapSuppliers;
+    }
+
+    protected PrintWriter getWriter() {
+        if (outputSink == null) {
+            setWriter(new PrintWriter(System.out));
+        }
+        return outputSink;
+    }
+
+    protected void setWriter(final PrintWriter outputSink) {
+        Objects.requireNonNull(outputSink);
+        this.outputSink = outputSink;
     }
 
 }

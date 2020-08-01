@@ -17,6 +17,8 @@ package com.macasaet.shootout;
 
 import static org.junit.jupiter.api.DynamicTest.dynamicTest;
 
+import java.io.IOException;
+import java.io.PrintWriter;
 import java.util.Collection;
 import java.util.Map;
 import java.util.Objects;
@@ -73,8 +75,9 @@ public abstract class MapBenchmark<K> {
      * Prepares the test, runs the test, then cleans up resources. The test
      * invocation is also timed and memory consumption is measured. Finally,
      * the results are emitted to stdout.
+     * @throws IOException 
      */
-    protected void execute() {
+    protected void execute() throws IOException {
         init();
         final var runtime = Runtime.getRuntime();
 
@@ -89,13 +92,27 @@ public abstract class MapBenchmark<K> {
         final var endNanos = System.nanoTime();
         final var endMemory = runtime.totalMemory() - runtime.freeMemory();
 
+        // release memory references to improve the likelihood that GC will
+        // happen before the next benchmark
+        destroy();
+
         final var elapsedNanos = endNanos - startNanos;
         final var consumedMemory = endMemory - startMemory;
 
-        System.out.println(
-                keyLabel + '\t' + testLabel + '\t' + getImplementation().name() + '\t' + getKeys().size() + '\t' + elapsedNanos + '\t' + consumedMemory);
-
-        destroy();
+        final var out = getWriter();
+        out.write(keyLabel);
+        out.append('\t');
+        out.write(testLabel);
+        out.append('\t');
+        out.write(getImplementation().name());
+        out.append('\t');
+        out.write(String.valueOf(getKeys().size()));
+        out.append('\t');
+        out.write(String.valueOf(elapsedNanos));
+        out.append('\t');
+        out.write(String.valueOf(consumedMemory));
+        out.println();
+        out.flush();
     }
 
     /**
@@ -147,4 +164,6 @@ public abstract class MapBenchmark<K> {
     protected Collection<K> getKeys() {
         return keys;
     }
+
+    protected abstract PrintWriter getWriter();
 }
