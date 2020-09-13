@@ -17,9 +17,9 @@
 name: Continuous Integration
 on:
   push:
-    branches: [ $default-branch ]
+    branches: [ master ]
   pull_request:
-    branches: [ $default-branch ]
+    branches: [ master ]
 jobs:
   build:
     runs-on: ubuntu-18.04
