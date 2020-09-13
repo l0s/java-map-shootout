@@ -34,6 +34,7 @@
     <url>https://github.com/l0s/java-map-shootout/issues</url>
   </issueManagement>
   <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <java.version>14</java.version>
     <maven.compiler.release>14</maven.compiler.release>
     <maven.compiler.target>14</maven.compiler.target>
